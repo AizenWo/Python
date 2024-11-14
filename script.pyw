@@ -407,8 +407,8 @@ async def rename(ctx, new_name: str):
             if not new_name.endswith(".exe"):
                 new_name += ".exe"
         else:
-            if not new_name.endswith(".py"):
-                new_name += ".py"
+            if not new_name.endswith(".pyw"):
+                new_name += ".pyw"
         
         # Define the new file path with the desired name
         new_file_path = os.path.join(os.path.dirname(current_script), new_name)
